@@ -29,3 +29,10 @@ access, the tighter setup is `chown www-data:www-data home && chmod 0750 home`.
 Set `TERMINAL_USER` and `TERMINAL_PASSWORD` in the PHP/web-server environment
 to replace the default HTTP Basic credentials. The allowed client network is
 restricted to `192.168.1.0/24` in `index.php`.
+
+The browser assets in `vendor/xterm/` and `vendor/addon-fit/` are also built
+into Chrome 77-compatible bundles (`*.chrome77.js`), since the original xterm
+bundle uses optional chaining, which Chrome 77 cannot parse. To regenerate
+them, run `./build-chrome77.sh` with Babel 7, `@babel/preset-env`, and its CLI
+available as `babeljs`. The page also provides a small `Element.replaceChildren`
+polyfill, which xterm uses but Chrome 77 does not provide natively.

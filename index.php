@@ -171,6 +171,10 @@ if ($action !== '') {
             $started = terminal_tmux(array('new-session', '-d', '-s', $name, '-x', $cols, '-y', $rows, '-c', $startDir, '-e', 'TERM=screen-256color', $sandboxCommand));
             if ($started['code'] !== 0) terminal_json(500, array('error' => trim($started['output']) ?: 'Could not start PTY session.'));
             terminal_tmux(array('pipe-pane', '-t', $name, 'cat >> ' . escapeshellarg($outputFile)));
+            // The shell's first prompt is usually printed before pipe-pane is attached.
+            // Submit an empty line now so the prompt is captured by the output stream.
+            usleep(100000);
+            terminal_tmux(array('send-keys', '-t', $name, 'Enter'));
             $_SESSION['terminal_offset'] = 0;
             terminal_json(200, array('ok' => true, 'snapshot' => ''));
         }
@@ -285,6 +289,7 @@ if ($action !== '') {
     #terminal-container { flex: 1; min-width: 0; min-height: 0; }
     #terminal { width: 100%; height: 100%; }
     .xterm { height: 100%; }
+    .xterm .xterm-viewport { background-color: transparent; }
     @media (max-width: 600px) { #screen { padding: 4px; } }
   </style>
 </head>
@@ -300,14 +305,34 @@ if ($action !== '') {
     </section>
     <footer class="footer"><span><i class="green">●</i> PHP + tmux PTY</span><span>vim, Ctrl+C und ANSI-Steuerung</span></footer>
   </main>
-  <script src="vendor/xterm/xterm.js"></script>
-  <script src="vendor/addon-fit/addon-fit.js"></script>
+  <script>
+    (function () {
+      if (window.Element && !Element.prototype.replaceChildren) {
+        Element.prototype.replaceChildren = function () {
+          while (this.firstChild) this.removeChild(this.firstChild);
+          for (var i = 0; i < arguments.length; i++) this.appendChild(arguments[i]);
+        };
+      }
+      window.addEventListener('error', function (event) {
+        var mount = document.getElementById('terminal-container');
+        if (!mount) return;
+        var message = event.message || (event.target && event.target.src ? 'Skript konnte nicht geladen werden: ' + event.target.src : 'Unbekannter JavaScript-Fehler');
+        mount.textContent = 'Terminal konnte nicht initialisiert werden: ' + message;
+        mount.style.color = '#ff7777';
+        mount.style.whiteSpace = 'pre-wrap';
+      }, true);
+    })();
+  </script>
+  <noscript>JavaScript ist erforderlich, um das Terminal zu starten.</noscript>
+  <script src="vendor/xterm/xterm.chrome77.js"></script>
+  <script src="vendor/addon-fit/addon-fit.chrome77.js"></script>
   <script>
     (function () {
       var mount = document.getElementById('terminal-container');
+      mount.textContent = '';
       var endpoint = mount.getAttribute('data-endpoint');
       var csrf = mount.getAttribute('data-csrf');
-      var terminal = new Terminal({cursorBlink: true, fontFamily: 'Consolas, monospace', fontSize: 13, scrollback: 5000, convertEol: false});
+      var terminal = new Terminal({allowTransparency: true, cursorBlink: true, cursorStyle: 'bar', cursorWidth: 2, fontFamily: 'Consolas, monospace', fontSize: 13, scrollback: 5000, convertEol: false, theme: {background: 'rgba(0, 0, 0, 0)', foreground: '#8bd49c', cursor: '#8bd49c'}});
       var fit = new FitAddon.FitAddon();
       var online = false;
       var inputQueue = [];
@@ -394,6 +419,7 @@ if ($action !== '') {
       request('start', 'POST', {cols: terminal.cols, rows: terminal.rows}, function (error, result) {
         if (error) { terminal.write('\x1b[31m' + error.message + '\x1b[0m\r\n'); return; }
         if (result.snapshot) terminal.write(decodeBase64(result.snapshot));
+        terminal.write('\x1b[?25h');
         online = true;
         resize();
         sendNext();
