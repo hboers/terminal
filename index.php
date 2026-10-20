@@ -24,6 +24,11 @@ if (!is_array($userInfo)) {
 $startDir = __DIR__ . '/home';
 define('TERMINAL_SHELL_USER', $terminalUser);
 $terminalName = getenv('TERMINAL_NAME') ?: 'x230t';
+$browserUserAgent = isset($_SERVER['HTTP_USER_AGENT']) ? $_SERVER['HTTP_USER_AGENT'] : '';
+$useChrome77Assets = preg_match('/Chrome\/(\d+)\./', $browserUserAgent, $chromeVersion)
+    && (int)$chromeVersion[1] < 80;
+$xtermScript = $useChrome77Assets ? 'vendor/xterm/xterm.chrome77.js' : 'vendor/xterm/xterm.js';
+$fitAddonScript = $useChrome77Assets ? 'vendor/addon-fit/addon-fit.chrome77.js' : 'vendor/addon-fit/addon-fit.js';
 if (!isset($_SESSION['terminal_tmux'])) $_SESSION['terminal_tmux'] = 'webterm_' . bin2hex(openssl_random_pseudo_bytes(12));
 if (!isset($_SESSION['terminal_output_file'])) {
     $outputFile = sys_get_temp_dir() . '/webterm-' . bin2hex(openssl_random_pseudo_bytes(24));
@@ -221,6 +226,7 @@ if ($action !== '') {
     }
     terminal_json(404, array('error' => 'Unknown terminal action.'));
 }
+header('Vary: User-Agent');
 ?>
 <!doctype html>
 <html lang="de">
@@ -324,8 +330,8 @@ if ($action !== '') {
     })();
   </script>
   <noscript>JavaScript ist erforderlich, um das Terminal zu starten.</noscript>
-  <script src="vendor/xterm/xterm.chrome77.js"></script>
-  <script src="vendor/addon-fit/addon-fit.chrome77.js"></script>
+  <script src="<?php echo terminal_escape($xtermScript); ?>"></script>
+  <script src="<?php echo terminal_escape($fitAddonScript); ?>"></script>
   <script>
     (function () {
       var mount = document.getElementById('terminal-container');
