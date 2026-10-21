@@ -1,19 +1,52 @@
 <?php
+// Load local configuration without overriding variables supplied by PHP-FPM.
+$envFile = __DIR__ . '/.env';
+if (is_readable($envFile)) {
+    foreach (file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $envLine) {
+        $envLine = trim($envLine);
+        if ($envLine === '' || $envLine[0] === '#' || strpos($envLine, '=') === false) continue;
+        list($envName, $envValue) = explode('=', $envLine, 2);
+        $envName = trim($envName);
+        $envValue = trim($envValue);
+        if ($envName === '' || getenv($envName) !== false) continue;
+        if (strlen($envValue) >= 2 && (($envValue[0] === '"' && substr($envValue, -1) === '"') || ($envValue[0] === "'" && substr($envValue, -1) === "'"))) {
+            $envValue = substr($envValue, 1, -1);
+        }
+        putenv($envName . '=' . $envValue);
+        $_ENV[$envName] = $envValue;
+    }
+} else {
+    error_log('Warning: .env is missing; copy dotenv.example to .env and configure it.');
+}
 session_start();
 $remoteAddress = isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '';
 if (strpos($remoteAddress, '::ffff:') === 0) $remoteAddress = substr($remoteAddress, 7);
-if (!preg_match('/^192\\.168\\.1\\.(?:[1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-4])$/', $remoteAddress)) {
-    http_response_code(403);
-    exit('Client address is outside the allowed 192.168.1.0/24 network.');
+$allowedNetwork = getenv('TERMINAL_ALLOWED_NETWORK') ?: '192.168.1.0/24';
+$networkParts = explode('/', $allowedNetwork, 2);
+$networkAddress = isset($networkParts[0]) ? $networkParts[0] : '';
+$prefixLength = isset($networkParts[1]) ? filter_var($networkParts[1], FILTER_VALIDATE_INT) : false;
+$remoteIp = ip2long($remoteAddress);
+$networkIp = ip2long($networkAddress);
+$networkAllowed = $remoteIp !== false && $networkIp !== false
+    && $prefixLength !== false && $prefixLength >= 0 && $prefixLength <= 32;
+if ($networkAllowed) {
+    $mask = $prefixLength === 0 ? 0 : (-1 << (32 - $prefixLength));
+    $networkAllowed = (($remoteIp & $mask) === ($networkIp & $mask));
 }
-$authUser = getenv('TERMINAL_USER') ?: 'hboers';
-$authPassword = getenv('TERMINAL_PASSWORD') ?: 'ElCondor';
-$providedUser = isset($_SERVER['PHP_AUTH_USER']) ? $_SERVER['PHP_AUTH_USER'] : '';
-$providedPassword = isset($_SERVER['PHP_AUTH_PW']) ? $_SERVER['PHP_AUTH_PW'] : '';
-if (!hash_equals($authUser, $providedUser) || !hash_equals(hash('sha256', $authPassword), hash('sha256', $providedPassword))) {
-    header('WWW-Authenticate: Basic realm="Host Terminal", charset="UTF-8"');
-    http_response_code(401);
-    exit('Authentication required.');
+if (!$networkAllowed) {
+    http_response_code(403);
+    exit('Client address is outside the allowed network.');
+}
+$authUser = getenv('TERMINAL_USER');
+if ($authUser !== false && $authUser !== '') {
+    $authPassword = getenv('TERMINAL_PASSWORD') ?: 'ElCondor';
+    $providedUser = isset($_SERVER['PHP_AUTH_USER']) ? $_SERVER['PHP_AUTH_USER'] : '';
+    $providedPassword = isset($_SERVER['PHP_AUTH_PW']) ? $_SERVER['PHP_AUTH_PW'] : '';
+    if (!hash_equals($authUser, $providedUser) || !hash_equals(hash('sha256', $authPassword), hash('sha256', $providedPassword))) {
+        header('WWW-Authenticate: Basic realm="Host Terminal", charset="UTF-8"');
+        http_response_code(401);
+        exit('Authentication required.');
+    }
 }
 $terminalUser = 'www-data';
 $userInfo = function_exists('posix_getpwnam') ? posix_getpwnam($terminalUser) : false;
@@ -69,6 +102,10 @@ function terminal_shell_command($args) {
 }
 function terminal_sandbox_args($startDir, $command) {
     return array_merge(array(
+        // PHP-FPM may contain secrets loaded from .env or its pool config.
+        // Clear the environment before Bubblewrap starts so it cannot be read
+        // from the shell or from /proc inside the PID namespace.
+        '/usr/bin/env', '-i', 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
         '/usr/bin/bwrap', '--die-with-parent', '--unshare-all', '--share-net',
         '--ro-bind', '/usr', '/usr',
         '--symlink', 'usr/bin', '/bin', '--symlink', 'usr/sbin', '/sbin',

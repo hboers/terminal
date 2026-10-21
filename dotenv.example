@@ -1,0 +1,5 @@
+# Nach .env kopieren und nach Bedarf anpassen.
+# Leer lassen, um HTTP Basic Auth zu deaktivieren.
+TERMINAL_USER=
+TERMINAL_PASSWORD=
+TERMINAL_ALLOWED_NETWORK=192.168.1.0/24

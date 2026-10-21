@@ -1,39 +1,99 @@
-# PHP host terminal
+# PHP-Host-Terminal
 
-The browser terminal runs Bash directly as `www-data` and starts in the
-project's `home/` directory. Commands and scripts run with the permissions of
-`www-data`; pasted multiline commands run in order in the same shell. The web
-application does not call `sudo`.
+## Installation auf Debian
 
-The shell runs inside Bubblewrap. Only `/usr` is mounted read-only for system
-commands; the writable project `home/` is mounted at `/home/terminal`. The
-host's `/var`, `/root`, other home directories, and host `/tmp` are outside the
-shell's filesystem view. Bash also runs in restricted mode, which blocks `cd`
-and changing the command path. Scripts in `home/` can be run as `bash name.sh`.
-Bubblewrap and unprivileged user namespaces must be available; the terminal
-must fail to start if the sandbox cannot be created.
+Installiere Git, nginx, PHP-FPM mit den benötigten Erweiterungen sowie tmux und
+Bubblewrap:
 
-`tmux.conf` sets tmux's command shell to Bash. This is needed because the
-system account `www-data` normally uses `/usr/sbin/nologin` as its login shell.
-New Bash sessions read `terminal.bashrc`, which sets the prompt to `terminal$`.
+```sh
+sudo apt update
+sudo apt install -y git nginx php-fpm php-cli php-posix bubblewrap tmux
+```
 
-The `home/` directory is writable by `www-data`, so scripts created there can
-be executed from the terminal. Its `.htaccess` blocks direct HTTP access to
-files when served by Apache. For nginx, add a location rule denying requests
-to `/home/`.
+Prüfe, dass unprivilegierte User-Namespaces auf dem Host verfügbar sind. Die
+Anwendung bricht den Start des Terminals ab, wenn Bubblewrap keine Sandbox
+erstellen kann.
 
-The current workspace cannot change directory ownership, so `home/` has the
-sticky bit and is writable by all local users. For a host with administrator
-access, the tighter setup is `chown www-data:www-data home && chmod 0750 home`.
+Checke die Anwendung unter `/var/www/html/terminal` aus:
 
-Set `TERMINAL_USER` and `TERMINAL_PASSWORD` in the PHP/web-server environment
-to replace the default HTTP Basic credentials. The allowed client network is
-restricted to `192.168.1.0/24` in `index.php`.
+```sh
+sudo git clone https://github.com/hboers/terminal.git /var/www/html/terminal
+sudo mkdir -p /var/www/html/terminal/home
+sudo chown www-data:www-data /var/www/html/terminal/home
+sudo chmod 0750 /var/www/html/terminal/home
+```
 
-The page selects Chrome 77-compatible bundles for Chrome versions below 80,
-based on the browser's user-agent string. Newer browsers use the original xterm
-bundles. The compatibility bundles are needed because the original xterm uses
-optional chaining, which Chrome 77 cannot parse. To regenerate the compatible
-bundles, run `./build-chrome77.sh` with Babel 7, `@babel/preset-env`, and its
-CLI available as `babeljs`. The page also provides an `Element.replaceChildren`
-polyfill for older browsers, which xterm uses but Chrome 77 does not provide.
+Passe `nginx.sample.conf` an (insbesondere `server_name` und den PHP-FPM-Socket)
+und installiere sie als nginx-Site. Die Vorlage gibt PHP-Dateien an PHP-FPM
+weiter und weist direkte Anfragen an `/home/` sowie versteckte Projektdateien
+ab. PHP-FPM muss als `www-data` laufen.
+Kopiere `dotenv.example` nach `.env` und passe die Werte dort an. `.env` wird von
+`index.php` geladen, sofern PHP-FPM die jeweilige Variable nicht bereits setzt.
+Für HTTP Basic Auth müssen `TERMINAL_USER` und `TERMINAL_PASSWORD` gesetzt sein;
+ist `TERMINAL_USER` leer, wird keine Basic-Auth-Abfrage gestellt. Das erlaubte
+Clientnetzwerk steht in `TERMINAL_ALLOWED_NETWORK` als IPv4-CIDR, zum Beispiel
+`192.168.1.0/24`. Ohne diesen Eintrag gilt `192.168.1.0/24`. Die lokale `.env`
+ist von Git ausgeschlossen. Bei Änderungen an PHP-FPM-Variablen PHP-FPM und
+nginx neu laden.
+
+Die Chrome-77-Bundles sind bereits im Repository enthalten. Nur wenn du sie
+neu erzeugen möchtest, installiere zusätzlich Node.js und npm und installiere
+Babel global:
+
+```sh
+sudo apt install -y nodejs npm
+sudo npm install --global @babel/cli @babel/core @babel/preset-env
+./build-chrome77.sh
+```
+^
+## Das Terminal
+
+Das Browser-Terminal führt Bash direkt als `www-data` aus und startet im
+Projektverzeichnis `home/`. Befehle und Skripte laufen mit den Berechtigungen
+von `www-data`; eingefügte mehrzeilige Befehle werden der Reihe nach in
+derselben Shell ausgeführt. Die Webanwendung verwendet kein `sudo`.
+
+Die Shell läuft innerhalb von Bubblewrap. Für Systembefehle wird nur `/usr`
+schreibgeschützt eingebunden; das beschreibbare Projektverzeichnis `home/`
+wird unter `/home/terminal` eingebunden. Das `/var`-Verzeichnis des Hosts,
+`/root`, andere Home-Verzeichnisse und das Host-Verzeichnis `/tmp` sind in der
+Dateisystemansicht der Shell nicht verfügbar. Bash läuft außerdem im
+eingeschränkten Modus, der `cd` und Änderungen am Befehlspfad blockiert.
+Skripte in `home/` lassen sich mit `bash name.sh` ausführen. Bubblewrap und
+unprivilegierte User-Namespaces müssen verfügbar sein; das Terminal darf nicht
+starten, wenn sich die Sandbox nicht erstellen lässt.
+
+In `tmux.conf` ist Bash als tmux-Befehlsshell festgelegt. Das ist nötig, weil
+das Systemkonto `www-data` normalerweise `/usr/sbin/nologin` als Login-Shell
+verwendet. Neue Bash-Sitzungen lesen `terminal.bashrc`, das den Prompt auf
+`terminal$` setzt.
+
+Das Verzeichnis `home/` ist für `www-data` beschreibbar, sodass dort erstellte
+Skripte im Terminal ausgeführt werden können. Seine `.htaccess`-Datei
+verhindert den direkten HTTP-Zugriff auf Dateien, wenn sie von Apache
+bereitgestellt werden. Für nginx muss eine Location-Regel ergänzt werden, die
+Anfragen an `/home/` verweigert.
+
+Der aktuelle Arbeitsbereich kann den Verzeichnisbesitzer nicht ändern. Deshalb
+hat `home/` das Sticky-Bit und ist für alle lokalen Benutzer beschreibbar. Auf
+einem Host mit Administratorzugriff ist folgende restriktivere Konfiguration
+geeignet: `chown www-data:www-data home && chmod 0750 home`.
+
+Die Anwendung lädt Einstellungen aus `.env`. Kopiere `dotenv.example` nach
+`.env`; fehlt `.env`, schreibt PHP eine Warnung ins PHP-Fehlerprotokoll. Die
+Vorlage enthält die verfügbaren Einstellungen. Leere `TERMINAL_USER` deaktiviert HTTP Basic Auth. Das erlaubte
+Clientnetzwerk wird über `TERMINAL_ALLOWED_NETWORK` als IPv4-CIDR festgelegt
+(Standard: `192.168.1.0/24`). Prozessvariablen von PHP-FPM haben Vorrang vor
+Werten aus `.env`.
+
+## Für alte Chromebooks
+
+Die Seite wählt anhand des User-Agent-Strings des Browsers Bundles aus, die mit
+Chrome 77 kompatibel sind, wenn die Chrome-Version unter 80 liegt. Neuere
+Browser verwenden die ursprünglichen xterm-Bundles. Die Kompatibilitäts-Bundles
+sind nötig, weil das ursprüngliche xterm optionales Chaining verwendet, das
+Chrome 77 nicht parsen kann. Um die kompatiblen Bundles neu zu erstellen, führe
+`./build-chrome77.sh` aus. Dafür müssen Babel 7, `@babel/preset-env` und dessen
+CLI unter dem Befehl `babeljs` verfügbar sein. Die Seite stellt außerdem einen
+Polyfill für `Element.replaceChildren` in älteren Browsern bereit. xterm
+verwendet diese Methode, Chrome 77 stellt sie jedoch nicht bereit.
